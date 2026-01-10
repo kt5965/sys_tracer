@@ -1,0 +1,24 @@
+# Object files
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.cmd
+
+# Libraries
+*.a
+*.so
+
+# Kernel module build artifacts
+modules.order
+Module.symvers
+.tmp_versions/
+
+# Executables
+user/ksysdump
+cli/ksysmon
+
+# Editors
+.vscode/
+*.swp
