@@ -1,0 +1,4 @@
+echo node | sudo tee /sys/module/ksys_trace/parameters/comm_filter 
+node 
+kt5965@kt5965-NUC8i3BEH:~/Desktop/project1-ksyscall-tracer/user$ ./ksysdump ./ksysdump: error while loading shared libraries: libc.so.6: cannot open shared object file: Operation not permitted 
+kt5965@kt5965-NUC8i3BEH:~/Desktop/project1-ksyscall-tracer/user$ sudo ./ksysdump sudo: error while loading shared libraries: libaudit.so.1: cannot open shared object file: Operation not permitted 
