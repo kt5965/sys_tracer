@@ -1,1 +1,0 @@
-savedcmd_ksys_trace.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /home/kt5965/linux-build/scripts/module.lds -o ksys_trace.ko ksys_trace.o ksys_trace.mod.o .module-common.o
