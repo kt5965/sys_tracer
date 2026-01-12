@@ -255,7 +255,7 @@ static int ksys_proc_show(struct seq_file *m, void *v)
 
 
 // “왜 open에서 r->next_seq=ksys_seq로 시작하냐?”
-// → 열자마자 옛날 이벤트(ps 스팸 등)를 쏟아내지 말고 ‘지금부터 생기는 이벤트’만 스트리밍 하려고.
+// → 열자마자 옛날 이벤트(ps 스팸 등)를 쏟아내지 말고 지금부터 생기는 이벤트만 스트리밍 하려고.
 static int ksys_dev_open(struct inode *inode, struct file *file)
 {
     struct ksys_reader *r;
@@ -351,16 +351,16 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
     char tmp[KSYS_PATH_LEN];
     int ret;
 
-    /* __x64_sys_openat(const struct pt_regs *regs) → regs->di 안에 그 포인터 */
+    // __x64_sys_openat(const struct pt_regs *regs) → regs->di 안에 그 포인터
     uregs = (const struct pt_regs *)regs->di;
 
-    /* syscall 인자 꺼내기 */
+    // syscall 인자 꺼내기
     event.dfd   = (int)uregs->di; // destination index 메모리 주소 오프셋
     filename = (const char __user *)uregs->si; // source index 
     event.flags = (int)uregs->dx;
     event.mode  = (umode_t)uregs->r10;
 
-    /* 공통 정보 채우기 */
+    // 공통 정보 채우기 
     event.ts_ns = ktime_get_ns();
     event.pid   = current->pid;
     event.tgid  = current->tgid;
@@ -370,10 +370,9 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 
     memset(event.path, 0, sizeof(event.path));
 
-    /* 유저 포인터에서 문자열 복사 */
+    // 유저 포인터에서 문자열 복사
     ret = strncpy_from_user(tmp, filename, sizeof(tmp));
     if (ret < 0) {
-        /* 실패시 표시용 */
         strncpy(event.path, "<badptr>", sizeof(event.path) - 1);
     } else {
         tmp[sizeof(tmp) - 1] = '\0';  // 혹시 모를 미종결 방지
@@ -383,10 +382,6 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
         return 0;
     }
     ksys_rb_push(&event);
-    /* ring buffer에 push */
-
-    /* 디버깅용: 아직은 한 줄 정도 printk도 남겨두자 (나중에 끌 예정) */
-
     return 0;
 }
 
@@ -395,7 +390,7 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 static void handler_post(struct kprobe *p, struct pt_regs *regs,
                          unsigned long flags)
 {
-    /* v0에서는 안 씀. 필요하면 추후 사용 */
+    // v0에서는 안 씀. 필요하면 추후 사용
 }
 
 

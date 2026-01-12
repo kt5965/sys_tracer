@@ -21,16 +21,16 @@ MODULE_DESCRIPTION("Simple syscall tracer using kprobe (ksys v1 - refactored)");
 #define KSYS_RING_SIZE 1024 
 #define KSYS_IOC_MAGIC 'k'
 
-// --- Data Structures ---
+//  Data Structures 
 
+#define KSYS_IOC_GET_STATS _IOR(KSYS_IOC_MAGIC, 1, struct ksys_stats)
+#define KSYS_IOC_SET_FILTERS _IOW(KSYS_IOC_MAGIC, 2, struct ksys_filter)
 struct ksys_stats {
     u64 cur_seq;
     u64 drops;
     u32 ring_size;
     u32 _pad;
 };
-#define KSYS_IOC_GET_STATS _IOR(KSYS_IOC_MAGIC, 1, struct ksys_stats)
-
 struct ksys_event {
     u64 seq;
     u64 ts_ns;
@@ -43,33 +43,45 @@ struct ksys_event {
     umode_t mode;
 };
 
+struct ksys_filter {
+    s32 pid;
+    s32 tgid;
+    char comm[16];
+};
+
 struct ksys_reader {
     u64 next_seq; // 이 리더가 다음에 읽어야 할 시퀀스 번호
     u64 drops;    // 리더가 늦어서 놓친 이벤트 수
 };
 
-// --- Globals ---
+//  Globals 
 
 static u64 ksys_seq = 0; // Monotonic increasing sequence number
 static struct ksys_event ksys_rb[KSYS_RING_SIZE];
 static DEFINE_SPINLOCK(ksys_rb_lock);
 static DECLARE_WAIT_QUEUE_HEAD(ksys_wq); // wait_queue 정적 선언
 
-// --- Parameters ---
+//  Parameters 
 static int pid_filter = -1;
 module_param(pid_filter, int, 0644);
 static int tgid_filter = -1;
 module_param(tgid_filter, int, 0644);
-static char *comm_filter = NULL;
-module_param(comm_filter, charp, 0644);
+static char comm_filter[KSYS_COMM_LEN];
+module_param_string(comm_filter, comm_filter, sizeof(comm_filter), 0644);
 
-// --- Helper Functions ---
+//  Helper Functions 
 
 static inline bool ksys_pass_filter(const struct ksys_event *ev)
 {
-    if (pid_filter != -1 && ev->pid != pid_filter) return false;
-    if (tgid_filter != -1 && ev->tgid != tgid_filter) return false;
-    if (comm_filter && comm_filter[0] && strncmp(ev->comm, comm_filter, KSYS_COMM_LEN)) return false;
+    if (pid_filter != -1 && ev->pid != pid_filter) 
+        return false;
+    if (tgid_filter != -1 && ev->tgid != tgid_filter) 
+        return false;
+    if (comm_filter[0]) {
+        if (strncmp(ev->comm, comm_filter, KSYS_COMM_LEN) != 0) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -85,7 +97,7 @@ static void ksys_rb_push_locked(const struct ksys_event *event)
     ksys_seq++; // 전체 시퀀스 증가
 }
 
-// --- Probe Handler ---
+//  Probe Handler 
 
 static struct kprobe kp = {
     .symbol_name = "__x64_sys_openat",
@@ -131,11 +143,11 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
     if (!ksys_pass_filter(&event))
         return 0;
 
-    // --- Critical Section Start ---
+    //  Critical Section Start 
     spin_lock_irqsave(&ksys_rb_lock, flags);
     ksys_rb_push_locked(&event);
     spin_unlock_irqrestore(&ksys_rb_lock, flags);
-    // --- Critical Section End ---
+    //  Critical Section End 
 
     wake_up_interruptible(&ksys_wq);
     return 0;
@@ -143,7 +155,7 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 
 static void handler_post(struct kprobe *p, struct pt_regs *regs, unsigned long flags) {}
 
-// --- File Operations ---
+//  File Operations 
 
 static int ksys_dev_open(struct inode *inode, struct file *file)
 {
@@ -181,7 +193,7 @@ static ssize_t ksys_dev_read(struct file *file, char __user *buf, size_t count, 
     // 최대 읽을 수 있는 개수
     size_t max_req = count / sizeof(struct ksys_event);
 
-    // --- Wait for data ---
+    //  Wait for data 
     // (조건: 읽을 데이터가 있거나, 시그널이 왔거나)
     if (wait_event_interruptible(ksys_wq, ({
         bool data_avail;
@@ -204,7 +216,7 @@ static ssize_t ksys_dev_read(struct file *file, char __user *buf, size_t count, 
         return -ERESTARTSYS; // Signal interrupt
     }
 
-    // --- Copy Data ---
+    //  Copy Data 
     spin_lock_irqsave(&ksys_rb_lock, flags);
     cur_seq = ksys_seq;
     
@@ -267,23 +279,37 @@ static __poll_t ksys_dev_poll(struct file *file, poll_table *wait)
 static long ksys_dev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct ksys_reader *r = file->private_data;
-    struct ksys_stats st;
-    unsigned long flags;
+    
+    switch (cmd)
+    {
+        case KSYS_IOC_GET_STATS: {
+            struct ksys_stats st;
+            unsigned long flags;
+            spin_lock_irqsave(&ksys_rb_lock, flags);
+            st.cur_seq = ksys_seq;
+            spin_unlock_irqrestore(&ksys_rb_lock, flags);
+        
+            st.drops = r ? r->drops : 0;
+            st.ring_size = KSYS_RING_SIZE;
+            st._pad = 0;
+        
+            if (copy_to_user((void __user*)arg, &st, sizeof(st)))
+                return -EFAULT;
+            return 0;
+        }
+        case KSYS_IOC_SET_FILTERS: {
+            struct ksys_filter ft;
 
-    if (cmd != KSYS_IOC_GET_STATS) return -EINVAL;
-
-    spin_lock_irqsave(&ksys_rb_lock, flags);
-    st.cur_seq = ksys_seq;
-    spin_unlock_irqrestore(&ksys_rb_lock, flags);
-
-    st.drops = r ? r->drops : 0;
-    st.ring_size = KSYS_RING_SIZE;
-    st._pad = 0;
-
-    if (copy_to_user((void __user*)arg, &st, sizeof(st)))
-        return -EFAULT;
-
-    return 0;
+            if (copy_from_user(&ft, (void __user*)arg, sizeof(ft)))
+                return -EFAULT;
+            pid_filter = ft.pid;
+            tgid_filter = ft.tgid;
+            strncpy(comm_filter, ft.comm, sizeof(KSYS_COMM_LEN));
+            return 0;
+        }
+        default:
+            return -ENOTTY;
+    }
 }
 
 static const struct file_operations ksys_fops = {
@@ -303,7 +329,7 @@ static struct miscdevice ksys_miscdev = {
     .mode  = 0444,
 };
 
-// --- Init/Exit ---
+//  Init/Exit 
 
 static int __init ksys_init(void)
 {
