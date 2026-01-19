@@ -55,14 +55,7 @@ struct ksys_start {
     uint64_t seq;
 };
 #define KSYS_IOC_SET_START  _IOW(KSYS_IOC_MAGIC, 3, struct ksys_start)
-
-enum ksys_start_mode {
-    KSYS_START_NOW    = 0,
-    KSYS_START_OLDEST = 1,
-    KSYS_START_SEQ    = 2,
-};
-
-
+enum { KSYS_START_NOW=0, KSYS_START_OLDEST=1, KSYS_START_SEQ=2 };
 
 static void json_escape_print(const char *s, size_t maxlen)
 {
@@ -109,12 +102,8 @@ static void print_stats_json(const struct ksys_stats *st)
 
 static int apply_filter_start(int fd, const struct ksys_filter *flt, const struct ksys_start *st)
 {
-    if (ioctl(fd, KSYS_IOC_SET_FILTER, flt) != 0) {
-        return -1;
-    }
-    if (ioctl(fd, KSYS_IOC_SET_START, st) != 0) {
-        return -1;
-    }
+    if (ioctl(fd, KSYS_IOC_SET_FILTER, flt) != 0) return -1;
+    if (ioctl(fd, KSYS_IOC_SET_START,  st)  != 0) return -1;
     return 0;
 }
 
@@ -125,6 +114,7 @@ int main(int argc, char **argv)
     bool use_et = false;      // --et면 EPOLLET
     struct ksys_filter flt;
     struct ksys_start st;
+
     memset(&flt, 0, sizeof(flt));
     flt.pid = -1;
     flt.tgid = -1;
@@ -150,13 +140,10 @@ int main(int argc, char **argv)
             snprintf(flt.comm, sizeof(flt.comm), "%s", argv[++i]);
         } else if (!strcmp(argv[i], "--from") && i + 1 < argc) {
             const char *v = argv[++i];
-            if (!strcmp(v, "now")) {
-                st.mode = KSYS_START_NOW;  
-            } else if (!strcmp(v, "oldest")) {
-                st.mode = KSYS_START_OLDEST;
-            } else if (!strncmp(v, "seq:", 4)) {
-                st.mode = KSYS_START_SEQ; st.seq = strtoull(v+4, NULL, 10); 
-            } else {
+            if (!strcmp(v, "now")) st.mode = KSYS_START_NOW;
+            else if (!strcmp(v, "oldest")) st.mode = KSYS_START_OLDEST;
+            else if (!strncmp(v, "seq:", 4)) { st.mode = KSYS_START_SEQ; st.seq = strtoull(v+4, NULL, 10); }
+            else {
                 fprintf(stderr, "bad --from: %s (now|oldest|seq:<N>)\n", v);
                 return 2;
             }
@@ -211,19 +198,15 @@ int main(int argc, char **argv)
         for (int i = 0; i < n; i++) {
             if (!(out[i].events & EPOLLIN)) continue;
 
-            // EPOLLET일 때는 반드시 EAGAIN까지 드레인
+            // ✅ EPOLLET일 때는 반드시 EAGAIN까지 드레인
             for (;;) {
                 struct ksys_event evs[256];
                 ssize_t r = read(fd, evs, sizeof(evs));
                 if (r < 0) {
-                    if (errno == EAGAIN) 
-                        break;
-                    if (errno == EINTR) 
-                        continue;
+                    if (errno == EAGAIN) break;
+                    if (errno == EINTR) continue;
                     perror("read");
-                    close(ep);
-                    close(fd);
-                    return 0;
+                    goto done;
                 }
                 if (r == 0) break;
 
@@ -248,4 +231,9 @@ int main(int argc, char **argv)
             fflush(stdout);
         }
     }
+
+done:
+    close(ep);
+    close(fd);
+    return 0;
 }
