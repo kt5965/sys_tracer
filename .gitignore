@@ -6,6 +6,9 @@
 *.mod.o
 *.cmd
 
+# Folder
+/GPT
+
 # Libraries
 *.a
 *.so

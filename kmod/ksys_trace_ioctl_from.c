@@ -137,8 +137,7 @@ static void ksys_rb_push_locked(const struct ksys_event *event)
 // --- KProbe Handler ---
 
 static struct kprobe kp = {
-    // 안전한 내부 함수 사용 (커널 버전에 따라 변경 가능)
-    .symbol_name = "do_sys_openat2", 
+    .symbol_name = "__x64_sys_openat", 
 };
 
 static int handler_pre(struct kprobe *p, struct pt_regs *regs)
